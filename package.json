@@ -2,7 +2,7 @@
 	"name": "lottie-stand",
 	"displayName": "Lottie Stand",
 	"description": "handle lottie file",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"publisher": "yidalin",
 	"icon": "public/icon.png",
 	"engines": {

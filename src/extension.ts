@@ -117,12 +117,11 @@ export function activate(context: vscode.ExtensionContext) {
     await Promise.all(
       uploadQueue.map(async (i: any) => {
         // 压缩
-
-        // try {
-        //   await compressFile(i.path);
-        // } catch (error) {
-        //   console.log('compressFile error: ', error);
-        // }
+        try {
+          await compressFile(i.path);
+        } catch (error) {
+          console.log('compressFile error: ', error);
+        }
 
         // 上传
         const res: any = await postImgOne(i.path);
