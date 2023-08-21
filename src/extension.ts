@@ -73,6 +73,12 @@ export function activate(context: vscode.ExtensionContext) {
             idx: index,
             path: sourcePath
           });
+          return (newAssets[index] = {
+            ...item,
+            u: '',
+            p: '',
+            e: 0
+          });
         } else {
           return (newAssets[index] = item);
         }
@@ -85,6 +91,12 @@ export function activate(context: vscode.ExtensionContext) {
           uploadQueue.push({
             idx: index,
             path: newPath
+          });
+          return (newAssets[index] = {
+            ...item,
+            u: '',
+            p: '',
+            e: 0
           });
         } else {
           const sourceBase64 = `data:image/${sourcePath.split('.').pop()};base64,${file.toString(
@@ -106,11 +118,11 @@ export function activate(context: vscode.ExtensionContext) {
       uploadQueue.map(async (i: any) => {
         // 压缩
 
-        try {
-          await compressFile(i.path);
-        } catch (error) {
-          console.log('compressFile error: ', error);
-        }
+        // try {
+        //   await compressFile(i.path);
+        // } catch (error) {
+        //   console.log('compressFile error: ', error);
+        // }
 
         // 上传
         const res: any = await postImgOne(i.path);
