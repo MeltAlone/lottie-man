@@ -1,13 +1,12 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-const fsPromises = require("fs").promises;
-import * as stream from 'stream';
 import * as path from 'path';
-const FormData = require('form-data');
-const mime = require('mime-kind');
-const axios = require('axios');
+import compressFile from './compress';
+import postImgOne from './post-img';
+import { isImage, delDir, guid, getBase64Size } from './utils';
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -56,119 +55,89 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 需要上传的队列
     const uploadQueue: any = [];
+    const inputDir = `images_${guid(8)}`;
+    const imagesDir = `${currentDir}/${inputDir}`;
+    fs.mkdirSync(imagesDir);
 
     // 遍历assets
     assets.forEach((item: any, index: number) => {
-      let sourceBase64: any;
       let sourcePath: string;
-      const isBase64=  /^data:image\/\w+;base64,/.test(item.p);
-      console.log('item.e === 1: ', item.e === 1);
-      console.log('isBase64: ', isBase64);
+      const isBase64 = /^data:image\/\w+;base64,/.test(item.p);
       if (item.e === 1 && isBase64) {
-        sourcePath = '';
-        sourceBase64 = item.p;
+        if (getBase64Size(item.p) > limit) {
+          sourcePath = imagesDir + '/' + guid(16) + '.png';
+          const base64 = item.p.replace(/^data:image\/\w+;base64,/, '');
+          const dataBuffer = Buffer.from(base64, 'base64');
+          fs.writeFileSync(sourcePath, dataBuffer);
+          uploadQueue.push({
+            idx: index,
+            path: sourcePath
+          });
+        } else {
+          return (newAssets[index] = item);
+        }
       } else if (item.e === 0 && isImage(item.p)) {
         sourcePath = path.join(currentDir, `${item.u}${item.p}`);
-        sourceBase64 = `data:image/${sourcePath.split('.').pop()};base64,${fs.readFileSync(sourcePath).toString('base64')}`;
+        const file = fs.readFileSync(sourcePath);
+        if (Buffer.from(file).length > limit * 1024) {
+          const newPath = imagesDir + '/' + item.p;
+          fs.writeFileSync(newPath, file);
+          uploadQueue.push({
+            idx: index,
+            path: newPath
+          });
+        } else {
+          const sourceBase64 = `data:image/${sourcePath.split('.').pop()};base64,${file.toString(
+            'base64'
+          )}`;
+          return (newAssets[index] = {
+            ...item,
+            u: '',
+            p: sourceBase64,
+            e: 1
+          });
+        }
       } else {
         return (newAssets[index] = item);
       }
-      if (!sourceBase64) {
-        return (newAssets[index] = item);
-      }
-      newAssets[index] = {
-        ...item,
-        u: '',
-        p: sourceBase64,
-        e: 0
-      };
-      if (Buffer.from(sourceBase64, 'base64')?.length > limit * 1024) {
-        uploadQueue.push({
-          idx: index,
-          source: sourceBase64,
-          path: sourcePath
-        });
-      }
     });
+    console.log('uploadQueue: ', uploadQueue);
+    await Promise.all(
+      uploadQueue.map(async (i: any) => {
+        // 压缩
 
-    await Promise.all(uploadQueue.map(async (i: any) => {
-      let path = i.path;
-      if (!path) {
-        path = currentDir +'/'+ Date.now() +'.png';
-        const base64 = i.source.replace(/^data:image\/\w+;base64,/, "");
-        const dataBuffer = Buffer.from(base64, 'base64');
-        await fsPromises.writeFile(path, dataBuffer);
-      }
-      const res: any = await postImgOne(path);
-      console.log('postImgOne res: ', res);
-      if (res?.respCode !== -1) {
-        newAssets[i.idx] = {
-          ...newAssets[i.idx],
-          u: '',
-          p: `https://pic1.zhuanstatic.com/zhuanzh/${res.respData}`,
-          e: 0
-        };
-      }
-    })).catch((err) => { 
-      console.log('Promise.all error: ', err);
-    }).finally(() => {
-    // 处理完成写入文件
-      lottieData.assets = newAssets;
-      const p = path.join(currentDir, 'lottie_anim.json');
-      fs.writeFileSync(p, JSON.stringify(lottieData), 'utf8');
-    });
+        try {
+          await compressFile(i.path);
+        } catch (error) {
+          console.log('compressFile error: ', error);
+        }
+
+        // 上传
+        const res: any = await postImgOne(i.path);
+        if (res?.respCode !== -1) {
+          newAssets[i.idx] = {
+            ...newAssets[i.idx],
+            u: '',
+            p: `https://pic1.zhuanstatic.com/zhuanzh/${res.respData}`,
+            e: 0
+          };
+        }
+      })
+    )
+      .catch((err) => {
+        console.log('Promise.all error: ', err);
+      })
+      .finally(() => {
+        // 处理完成写入文件
+        lottieData.assets = newAssets;
+        const p = path.join(currentDir, 'lottie_anim.json');
+        fs.writeFileSync(p, JSON.stringify(lottieData), 'utf8');
+        delDir(imagesDir);
+      });
     vscode.window.showInformationMessage('success', { modal: true });
   });
 
   context.subscriptions.push(disposable);
 }
-
-/**图片上传 */
-const postImgOne = async (path: any) => {
-  return new Promise(async(resolve, reject) => {
-    const data = new FormData();
-    // const rs = fs.createReadStream(path) 当使用 `fs.createReadStream()` 方法读取文件时，如果将读取流赋值给变量并没有正确地处理流事件，就可能导致文件读取失败。
-    data.append('multipartFile', fs.createReadStream(path));
-    data.append('path', '/zhuanzh/');
-    const sign = Buffer.from(encodeURIComponent(Date.now()))
-      .toString('base64')
-      .split('')
-      .reverse()
-      .join('');
-    data.append('sign', sign);
-    try {
-      if (mime(fs.createReadStream(path)).ext === 'jpg' || mime(fs.createReadStream(path)).ext === 'jpeg') {
-        data.append('outputFormat', 'jpg');
-      }
-    } catch (error) {
-      console.log('error: ', error);
-    }
-    axios({
-      method: 'post',
-      headers: {
-        ...data.getHeaders()
-      },
-      url: 'https://mediaproxy.zhuanzhuan.com/media/picture/upload',
-      data: data
-    })
-      .then((response: any) => {
-        setTimeout(() => {
-          fs.unlinkSync(path);
-        }, 2000);
-        resolve(response.data);
-      })
-      .catch((error: any) => {
-        reject(error);
-      });
-  });
-};
-
-const isImage = (fileName: string) => {
-  let suffix = fileName.split('.').pop();
-  const imgList = ['png', 'jpg', 'jpeg', 'bmp', 'gif'];
-  return imgList.some((item) => item === suffix);
-};
-// this method is called when your extension is deactivated
-
 
 export function deactivate() {}
